@@ -74,8 +74,8 @@ if st.session_state.activities:
     
     st.divider()
     
-    # Trzy zakładki
-    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Statystyki Roczne"])
+    # Trzy zakładki (zmieniono na statystyki miesięczne)
+    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Statystyki Miesięczne"])
     
     # --- ZAKŁADKA 1: MAPA ---
     with tab1:
@@ -167,43 +167,44 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: WYKRESY ROCZNE (LINIOWE, DOKŁADNE) ---
+    # --- ZAKŁADKA 3: WYKRESY MIESIĘCZNE (LINIOWE, DOKŁADNE) ---
     with tab3:
-        st.subheader("📈 Dokładny dystans (km) w rozbiciu na lata i sporty")
+        st.subheader("📈 Dokładny dystans (km) w rozbiciu na miesiące i sporty")
         
         chart_rows = []
         for act in st.session_state.activities:
             start_time = act.get('startTimeLocal')
-            if start_time and len(start_time) >= 4:
-                year = start_time[:4]
+            if start_time and len(start_time) >= 7:
+                year_month = start_time[:7]  # Pobiera rok i miesiąc, np. "2023-05"
                 type_key = act.get('activityType', {}).get('typeKey', 'inne')
                 distance_m = act.get('distance', 0)
-                distance_km = distance_m / 1000 if distance_m else 0  # Bez zaokrąglania (dokładny wynik)
+                distance_km = distance_m / 1000 if distance_m else 0  # Dokładny wynik bez zaokrąglania
                 
                 if distance_km > 0:
                     display_name = sport_names.get(type_key, type_key.replace('_', ' ').capitalize())
                     chart_rows.append({
-                        "Rok": str(year),
+                        "Miesiąc": year_month,
                         "Sport": display_name,
                         "Dystans (km)": distance_km
                     })
         
         if chart_rows:
             df_chart = pd.DataFrame(chart_rows)
-            df_grouped = df_chart.groupby(["Rok", "Sport"], as_index=False)["Dystans (km)"].sum()
+            df_grouped = df_chart.groupby(["Miesiąc", "Sport"], as_index=False)["Dystans (km)"].sum()
+            df_grouped = df_grouped.sort_values("Miesiąc")  # Sortowanie chronologiczne
             
-            # Wykres liniowy (px.line) z widocznymi punktami (markers=True)
+            # Wykres liniowy z punktami w ujęciu miesięcznym
             fig = px.line(
                 df_grouped,
-                x="Rok",
+                x="Miesiąc",
                 y="Dystans (km)",
                 color="Sport",
                 markers=True,
-                title="Trend dystansu w poszczególnych latach"
+                title="Trend dystansu w poszczególnych miesiącach"
             )
             
             fig.update_layout(
-                xaxis_title="Rok",
+                xaxis_title="Miesiąc",
                 yaxis_title="Łączny dystans (km)",
                 legend_title="Dyscyplina",
                 hovermode="x unified"
