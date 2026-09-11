@@ -167,11 +167,10 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (WIELE LAT NA JEDNYM WYKRESIE) ---
+    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (CIĄGŁY WYKRES) ---
     with tab3:
-        st.subheader("📈 Cumulative Distance Progressions (Wszystkie lata na jednym wykresie)")
+        st.subheader("📈 Cumulative Distance Progressions")
         
-        # Opcjonalny filtr sportów do wykresu
         all_sport_keys = list(set([act.get('activityType', {}).get('typeKey', 'inne') for act in st.session_state.activities]))
         selected_chart_sports = st.multiselect(
             "Filtruj sporty do wykresu postępów:",
@@ -186,15 +185,12 @@ if st.session_state.activities:
         ]
         
         if filtered_progress_acts:
-            # Przygotowujemy codzienne dane dla każdego roku
             daily_records = []
             for act in filtered_progress_acts:
                 st_time = act.get('startTimeLocal')
                 if st_time and len(st_time) >= 10:
-                    date_str = st_time[:10]  # "YYYY-MM-DD"
+                    date_str = st_time[:10]
                     year = date_str[:4]
-                    # Tworzymy datę "zamienną" na rok 2024 (rok przestępny, żeby obsłużyć 29 lutego), 
-                    # żeby wszystkie lata nałożyły się na tę samą oś X (od 1 stycznia do 31 grudnia)
                     try:
                         dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
                         normalized_date = dt.replace(year=2024).strftime("%m-%d")
@@ -206,35 +202,25 @@ if st.session_state.activities:
                         daily_records.append({
                             "Year": str(year),
                             "NormalizedDate": normalized_date,
-                            "OriginalDate": date_str,
                             "Distance": distance_km
                         })
             
             if daily_records:
                 df_prog = pd.DataFrame(daily_records)
-                
-                # Agregujemy dystans dzienny per Rok i Znormalizowana Data
                 df_daily_sum = df_prog.groupby(["Year", "NormalizedDate"], as_index=False)["Distance"].sum()
-                df_daily_sum = df_daily_sum.sort_values(["Year", "NormalizedDate"])
                 
-                # Obliczamy sumę kumulatywną (narastającą) osobno dla każdego roku
-                df_daily_sum["CumulativeDistance"] = df_daily_sum.groupby("Year")["Distance"].cumsum()
-                
-                # Generujemy pełną siatkę dni dla każdego roku obecnego w danych, aby linie były płynne
                 years_present = sorted(df_daily_sum["Year"].unique())
-                full_calendar = []
-                
-                # Tworzymy wzorcowy rok 2024 (dni od 01-01 do 12-31)
                 date_range = pd.date_range(start="2024-01-01", end="2024-12-31").strftime("%m-%d").tolist()
                 
+                full_calendar = []
                 for yr in years_present:
                     yr_subset = df_daily_sum[df_daily_sum["Year"] == yr]
-                    running_total = 0.0
-                    dict_yr = dict(zip(yr_subset["NormalizedDate"], yr_subset["CumulativeDistance"]))
+                    dict_yr = dict(zip(yr_subset["NormalizedDate"], yr_subset["Distance"]))
                     
+                    running_total = 0.0
                     for d in date_range:
                         if d in dict_yr:
-                            running_total = dict_yr[d]
+                            running_total += dict_yr[d]  # Sumujemy narastająco każdy dzień
                         full_calendar.append({
                             "Year": yr,
                             "NormalizedDate": d,
@@ -243,7 +229,6 @@ if st.session_state.activities:
                         
                 df_final_plot = pd.DataFrame(full_calendar)
                 
-                # Tworzymy wykres Plotly przypominający VeloViewer
                 fig = px.line(
                     df_final_plot,
                     x="NormalizedDate",
@@ -253,7 +238,6 @@ if st.session_state.activities:
                     labels={"NormalizedDate": "Dzień roku", "CumulativeDistance": "Łączny dystans (km)", "Year": "Rok"}
                 )
                 
-                # Ładne formatowanie osi X (pokazujące miesiące zamiast dat mm-dd)
                 month_ticks = ["01-01", "02-01", "03-01", "04-01", "05-01", "06-01", "07-01", "08-01", "09-01", "10-01", "11-01", "12-01"]
                 month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
                 
@@ -271,7 +255,7 @@ if st.session_state.activities:
                 
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("Brak wystarczających danych o dystansie do zbudowania wykresów rocznych.")
+                st.info("Brak wystarczających danych o dystansie do zbudowania wykresów.")
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 else:
