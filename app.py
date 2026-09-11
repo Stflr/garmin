@@ -277,9 +277,9 @@ if st.session_state.activities:
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 
-    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (Z FILTREM DYSCYPLINY DO STATYSTYK) ---
+    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY + PODSUMOWANIE TYGODNIOWE ---
     with tab4:
-        st.subheader("📅 Kalendarz Aktywności Miesięcznej i Porównania")
+        st.subheader("📅 Kalendarz Aktywności Miesięcznej i Podsumowania")
         
         df_acts = pd.DataFrame(st.session_state.activities)
         if not df_acts.empty and 'startTimeLocal' in df_acts.columns:
@@ -288,12 +288,12 @@ if st.session_state.activities:
             df_acts['Year'] = df_acts['DateTime'].dt.year
             df_acts['Month'] = df_acts['DateTime'].dt.month
             df_acts['DistanceKm'] = (df_acts['distance'].fillna(0)) / 1000
+            df_acts['DurationSec'] = df_acts['duration'].fillna(0)
             df_acts['SportKey'] = df_acts['activityType'].apply(lambda x: x.get('typeKey', 'Inne') if isinstance(x, dict) else 'Inne')
             df_acts['SportName'] = df_acts['SportKey'].map(lambda k: sport_names.get(k, k.replace('_', ' ').capitalize()))
             
             available_years = sorted(df_acts['Year'].dropna().unique(), reverse=True)
             if available_years:
-                # Wiersz wyboru roku, miesiąca oraz dyscypliny do statystyk kilometrów
                 col_sel1, col_sel2, col_sel3 = st.columns(3)
                 with col_sel1:
                     sel_year = st.selectbox("Wybierz rok:", available_years, key="cal_year")
@@ -318,7 +318,7 @@ if st.session_state.activities:
                 
                 st.divider()
                 
-                # Filtrowanie ramki danych pod kątem wybranej dyscypliny do statystyk kilometrowych
+                # Filtrowanie ramki danych pod kątem wybranej dyscypliny do statystyk
                 if stat_sport_option == 'running':
                     df_stat_acts = df_acts[df_acts['SportKey'].isin(['running', 'treadmill_running'])]
                 elif stat_sport_option == 'cycling':
@@ -326,7 +326,7 @@ if st.session_state.activities:
                 else:
                     df_stat_acts = df_acts
                 
-                # Obliczenia statystyk miesiąca i roku na podstawie wybranej dyscypliny
+                # Obliczenia statystyk miesiąca i roku
                 current_month_acts = df_stat_acts[(df_stat_acts['Year'] == sel_year) & (df_stat_acts['Month'] == sel_month)]
                 current_month_dist = current_month_acts['DistanceKm'].sum()
                 
@@ -355,6 +355,47 @@ if st.session_state.activities:
                         value=f"{current_year_dist:.1f} km",
                         delta=f"{year_diff:+.1f} km vs {prev_year}" if not prev_year_acts.empty else f"Brak danych z {prev_year}"
                     )
+                
+                st.divider()
+
+                # --- NOWOŚĆ: PODSUMOWANIE TYGODNIOWE ---
+                st.markdown(f"### 📊 Podsumowanie tygodniowe w {months_pl[sel_month]} {sel_year}")
+                if not current_month_acts.empty:
+                    # Przypisanie numeru tygodnia ISO do bieżących aktywności miesiąca
+                    current_month_acts = current_month_acts.copy()
+                    current_month_acts['IsoWeek'] = current_month_acts['DateTime'].dt.isocalendar().week
+                    current_month_acts['IsoYear'] = current_month_acts['DateTime'].dt.isocalendar().year
+                    
+                    # Czasami grudniowe/styczniowe dni nachodzą na sąsiedni rok w kalendarzu ISO, dopasowujemy do wybranego roku
+                    weekly_summary = []
+                    # Generujemy tygodnie na podstawie dni kalendarzowych miesiąca
+                    cal = calendar.Calendar(firstweekday=0)
+                    month_weeks = cal.monthdatescalendar(sel_year, sel_month)
+                    
+                    for i, w in enumerate(month_weeks, 1):
+                        w_start = w[0]
+                        w_end = w[-1]
+                        # Aktywności mieszczące się w tym tygodniu (w ramach wybranego miesiąca/roku)
+                        w_acts = current_month_acts[(current_month_acts['Date'] >= w_start) & (current_month_acts['Date'] <= w_end)]
+                        
+                        w_dist = w_acts['DistanceKm'].sum()
+                        w_count = len(w_acts)
+                        w_duration_sec = w_acts['DurationSec'].sum()
+                        w_hours = int(w_duration_sec // 3600)
+                        w_mins = int((w_duration_sec % 3600) // 60)
+                        w_time_str = f"{w_hours}h {w_mins}m" if w_hours > 0 else f"{w_mins}m"
+                        
+                        weekly_summary.append({
+                            "Tydzień": f"Tydzień {i} ({w_start.strftime('%d.%m')} - {w_end.strftime('%d.%m')})",
+                            "Liczba treningów": w_count,
+                            "Dystans (km)": round(w_dist, 2),
+                            "Czas trwania": w_time_str if w_count > 0 else "-"
+                        })
+                    
+                    df_weekly = pd.DataFrame(weekly_summary)
+                    st.dataframe(df_weekly, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Brak aktywności spełniających kryteria w wybranym miesiącu.")
                 
                 st.divider()
                 
