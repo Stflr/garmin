@@ -74,8 +74,8 @@ if st.session_state.activities:
     
     st.divider()
     
-    # Trzy zakładki (zmieniono na statystyki miesięczne)
-    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Statystyki Miesięczne"])
+    # Trzy zakładki
+    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Wykres Roczny (Miesiąc po miesiącu)"])
     
     # --- ZAKŁADKA 1: MAPA ---
     with tab1:
@@ -167,51 +167,93 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: WYKRESY MIESIĘCZNE (LINIOWE, DOKŁADNE) ---
+    # --- ZAKŁADKA 3: WYKRES MIESIĘCZNY DLA WYBRANEGO ROKU ---
     with tab3:
-        st.subheader("📈 Dokładny dystans (km) w rozbiciu na miesiące i sporty")
+        st.subheader("📈 Dokładny dystans miesiąc po miesiącu w wybranym roku")
         
-        chart_rows = []
+        # Wyciągamy dostępne lata z aktywności
+        years = set()
         for act in st.session_state.activities:
-            start_time = act.get('startTimeLocal')
-            if start_time and len(start_time) >= 7:
-                year_month = start_time[:7]  # Pobiera rok i miesiąc, np. "2023-05"
-                type_key = act.get('activityType', {}).get('typeKey', 'inne')
-                distance_m = act.get('distance', 0)
-                distance_km = distance_m / 1000 if distance_m else 0  # Dokładny wynik bez zaokrąglania
-                
-                if distance_km > 0:
-                    display_name = sport_names.get(type_key, type_key.replace('_', ' ').capitalize())
-                    chart_rows.append({
-                        "Miesiąc": year_month,
-                        "Sport": display_name,
-                        "Dystans (km)": distance_km
-                    })
+            st_time = act.get('startTimeLocal')
+            if st_time and len(st_time) >= 4:
+                years.add(st_time[:4])
         
-        if chart_rows:
-            df_chart = pd.DataFrame(chart_rows)
-            df_grouped = df_chart.groupby(["Miesiąc", "Sport"], as_index=False)["Dystans (km)"].sum()
-            df_grouped = df_grouped.sort_values("Miesiąc")  # Sortowanie chronologiczne
+        available_years = sorted(list(years), reverse=True)
+        
+        if available_years:
+            selected_year = st.selectbox("Wybierz rok do analizy:", available_years)
             
-            # Wykres liniowy z punktami w ujęciu miesięcznym
-            fig = px.line(
-                df_grouped,
-                x="Miesiąc",
-                y="Dystans (km)",
-                color="Sport",
-                markers=True,
-                title="Trend dystansu w poszczególnych miesiącach"
-            )
+            # Filtrujemy aktywności tylko dla wybranego roku
+            year_acts = [act for act in st.session_state.activities if act.get('startTimeLocal', '').startswith(selected_year)]
             
-            fig.update_layout(
-                xaxis_title="Miesiąc",
-                yaxis_title="Łączny dystans (km)",
-                legend_title="Dyscyplina",
-                hovermode="x unified"
-            )
+            chart_rows = []
+            active_sports = set()
+            for act in year_acts:
+                start_time = act.get('startTimeLocal')
+                if start_time and len(start_time) >= 7:
+                    month = start_time[5:7]  # Pobieramy numer miesiąca ("01", "02" itd.)
+                    type_key = act.get('activityType', {}).get('typeKey', 'inne')
+                    distance_m = act.get('distance', 0)
+                    distance_km = distance_m / 1000 if distance_m else 0
+                    
+                    if distance_km > 0:
+                        display_name = sport_names.get(type_key, type_key.replace('_', ' ').capitalize())
+                        active_sports.add(display_name)
+                        chart_rows.append({
+                            "Miesiąc_Num": month,
+                            "Sport": display_name,
+                            "Dystans (km)": distance_km
+                        })
             
-            st.plotly_chart(fig, use_container_width=True)
+            if chart_rows:
+                df_chart = pd.DataFrame(chart_rows)
+                df_grouped = df_chart.groupby(["Miesiąc_Num", "Sport"], as_index=False)["Dystans (km)"].sum()
+                
+                # Słownik pełnych nazw miesięcy, aby linijka leciała od Stycznia do Grudnia
+                months_map = {
+                    '01': 'Styczeń', '02': 'Luty', '03': 'Marzec', '04': 'Kwiecień',
+                    '05': 'Maj', '06': 'Czerwiec', '07': 'Lipiec', '08': 'Sierpień',
+                    '09': 'Wrzesień', '10': 'Październik', '11': 'Listopad', '12': 'Grudzień'
+                }
+                
+                # Budujemy pełną siatkę miesięcy dla każdego sportu (uzupełnienie zerami, żeby linia szła poprawnie)
+                full_grid = []
+                for sport in active_sports:
+                    for m_num, m_name in months_map.items():
+                        match = df_grouped[(df_grouped["Miesiąc_Num"] == m_num) & (df_grouped["Sport"] == sport)]
+                        dist = match["Dystans (km)"].values[0] if not match.empty else 0.0
+                        full_grid.append({
+                            "Miesiąc_Num": m_num,
+                            "Miesiąc": m_name,
+                            "Sport": sport,
+                            "Dystans (km)": dist
+                        })
+                
+                df_full = pd.DataFrame(full_grid)
+                df_full = df_full.sort_values("Miesiąc_Num")
+                
+                # Tworzymy wykres liniowy
+                fig = px.line(
+                    df_full,
+                    x="Miesiąc",
+                    y="Dystans (km)",
+                    color="Sport",
+                    markers=True,
+                    title=f"Aktywność w roku {selected_year}"
+                )
+                
+                fig.update_layout(
+                    xaxis_title="Miesiąc",
+                    yaxis_title="Dystans (km)",
+                    legend_title="Dyscyplina",
+                    hovermode="x unified",
+                    xaxis={'categoryorder': 'array', 'categoryarray': list(months_map.values())}
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info(f"Brak danych o dystansie dla roku {selected_year}.")
         else:
-            st.info("Brak danych o dystansie do wyświetlenia na wykresie.")
+            st.info("Brak danych o latach w aktywnościach.")
 else:
     st.info("👈 Zaloguj się do Garmina w panelu bocznym, aby uruchomić aplikację.")
