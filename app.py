@@ -277,7 +277,7 @@ if st.session_state.activities:
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 
-    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (WIELE KOLORÓW WG SPORTÓW) ---
+    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (Z LINKAMI I ODPOWIEDNIĄ WYSOKOŚCIĄ) ---
     with tab4:
         st.subheader("📅 Kalendarz Aktywności Miesięcznej")
         
@@ -326,18 +326,18 @@ if st.session_state.activities:
                     'Inne': '#808080'              # Szary
                 }
                 
-                # Budujemy czytelną tabelę HTML kalendarza
+                # Budujemy kompaktową tabelę HTML kalendarza
                 days_header = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
                 
                 html_code = f"""
-                <div style="font-family: sans-serif; background-color: #0e1117; color: #ffffff; padding: 10px; border-radius: 10px;">
-                    <h3 style="text-align: center; color: #ffffff; margin-bottom: 20px;">{months_pl[sel_month]} {sel_year}</h3>
+                <div style="font-family: sans-serif; background-color: #0e1117; color: #ffffff; padding: 5px; border-radius: 10px;">
+                    <h3 style="text-align: center; color: #ffffff; margin-bottom: 15px;">{months_pl[sel_month]} {sel_year}</h3>
                     <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
                         <thead>
                             <tr>
                 """
                 for dh in days_header:
-                    html_code += f"<th style='padding: 10px; border: 1px solid #30333b; background-color: #1f242d; color: #9fa6b2; text-align: center; font-size: 14px;'>{dh}</th>"
+                    html_code += f"<th style='padding: 8px; border: 1px solid #30333b; background-color: #1f242d; color: #9fa6b2; text-align: center; font-size: 13px;'>{dh}</th>"
                 html_code += "</tr></thead><tbody>"
                 
                 for week in month_days:
@@ -345,30 +345,41 @@ if st.session_state.activities:
                     for day in week:
                         if day == 0:
                             # Puste pole dla dni spoza miesiąca
-                            html_code += "<td style='height: 90px; border: 1px solid #30333b; background-color: #161920; opacity: 0.3;'></td>"
+                            html_code += "<td style='height: 75px; border: 1px solid #30333b; background-color: #161920; opacity: 0.3;'></td>"
                         else:
                             # Szukamy aktywności w ten konkretny dzień
                             current_date = datetime.date(sel_year, sel_month, day)
                             day_data = month_acts[month_acts['Date'] == current_date]
                             
                             cell_bg = "#1f242d" # Domyślny kolor pustego dnia
-                            content = f"<div style='font-weight: bold; font-size: 13px; color: #ffffff; margin-bottom: 5px;'>{day}</div>"
+                            content = f"<div style='font-weight: bold; font-size: 12px; color: #ffffff; margin-bottom: 2px;'>{day}</div>"
                             
                             if not day_data.empty:
-                                # Jeśli w ten dzień było coś robione, bierzemy główny sport lub pierwszy z brzegu
                                 main_sport = day_data.iloc[0]['SportKey']
                                 sport_label = day_data.iloc[0]['SportName']
                                 total_dist = day_data['DistanceKm'].sum()
+                                act_id = day_data.iloc[0].get('activityId')
                                 
                                 cell_bg = sport_colors.get(main_sport, '#00cc66')
-                                content += f"<div style='font-size: 11px; background: rgba(0,0,0,0.3); padding: 3px; border-radius: 4px; margin-top: 2px;'>{sport_label}<br><b>{total_dist:.1f} km</b></div>"
+                                
+                                # Dodajemy link do Garmina jeśli jest ID aktywności
+                                if act_id:
+                                    garmin_url = f"https://connect.garmin.com/modern/activity/{act_id}"
+                                    content += f"<div style='font-size: 10px; background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 4px; margin-top: 2px; line-height: 1.2;'>" \
+                                               f"<span style='color: #ffffff;'>{sport_label}</span><br>" \
+                                               f"<b>{total_dist:.1f} km</b><br>" \
+                                               f"<a href='{garmin_url}' target='_blank' style='color: #ffffff; text-decoration: underline; font-weight: bold;'>🔗 Garmin</a>" \
+                                               f"</div>"
+                                else:
+                                    content += f"<div style='font-size: 10px; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 4px; margin-top: 2px;'>{sport_label}<br><b>{total_dist:.1f} km</b></div>"
                             
-                            html_code += f"<td style='height: 90px; border: 1px solid #30333b; background-color: {cell_bg}; vertical-align: top; padding: 6px; text-align: left; overflow: hidden;'>{content}</td>"
+                            html_code += f"<td style='height: 75px; border: 1px solid #30333b; background-color: {cell_bg}; vertical-align: top; padding: 4px; text-align: left; overflow: hidden;'>{content}</td>"
                     html_code += "</tr>"
                 
                 html_code += "</tbody></table></div>"
                 
-                components.html(html_code, height=450)
+                # Zwiększona wysokość komponentu, żeby wszystko mieściło się bez suwaków
+                components.html(html_code, height=420)
             else:
                 st.info("Brak dat w aktywnościach.")
 
