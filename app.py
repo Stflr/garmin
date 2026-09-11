@@ -7,6 +7,7 @@ import folium
 from folium.plugins import MarkerCluster
 import plotly.express as px
 import plotly.graph_objects as go
+import calendar
 
 st.set_page_config(page_title="Moje dane Garmin", page_icon="🏃", layout="wide")
 
@@ -93,7 +94,7 @@ if st.session_state.activities:
         "📍 Mapa", 
         "🏆 Wyniki", 
         "📈 Postępy Lat", 
-        "🔥 Kalendarz & Tydzień", 
+        "🔥 Kalendarz Miesięczny", 
         "❤️ Analiza Formy"
     ])
     
@@ -276,84 +277,100 @@ if st.session_state.activities:
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 
-    # --- ZAKŁADKA 4: CZYTELNY KALENDARZ AKTYWNOŚCI & PODSUMOWANIA ---
+    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (WIELE KOLORÓW WG SPORTÓW) ---
     with tab4:
-        st.subheader("📊 Podsumowania okresowe i Kalendarz aktywności")
+        st.subheader("📅 Kalendarz Aktywności Miesięcznej")
         
         df_acts = pd.DataFrame(st.session_state.activities)
         if not df_acts.empty and 'startTimeLocal' in df_acts.columns:
             df_acts['DateTime'] = pd.to_datetime(df_acts['startTimeLocal'], errors='coerce')
             df_acts['Date'] = df_acts['DateTime'].dt.date
             df_acts['DistanceKm'] = (df_acts['distance'].fillna(0)) / 1000
+            df_acts['SportKey'] = df_acts['activityType'].apply(lambda x: x.get('typeKey', 'Inne') if isinstance(x, dict) else 'Inne')
+            df_acts['SportName'] = df_acts['SportKey'].map(lambda k: sport_names.get(k, k.replace('_', ' ').capitalize()))
             
-            # KPI Tygodniowe / Miesięczne
-            now = datetime.datetime.now()
-            current_week = now.isocalendar()[1]
-            current_month = now.month
-            current_year = now.year
-            
-            this_week_dist = df_acts[(df_acts['DateTime'].dt.isocalendar().week == current_week) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
-            last_week_dist = df_acts[(df_acts['DateTime'].dt.isocalendar().week == current_week - 1) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
-            
-            this_month_dist = df_acts[(df_acts['DateTime'].dt.month == current_month) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
-            last_month_dist = df_acts[(df_acts['DateTime'].dt.month == current_month - 1) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
-            
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.metric("🏃 Dystans w tym tygodniu", f"{this_week_dist:.1f} km", delta=f"{this_week_dist - last_week_dist:.1f} km vs pop. tydzień")
-            with col_b:
-                st.metric("📅 Dystans w tym miesiącu", f"{this_month_dist:.1f} km", delta=f"{this_month_dist - last_month_dist:.1f} km vs pop. miesiąc")
+            # Wybór roku i miesiąca przez użytkownika
+            available_years = sorted(df_acts['DateTime'].dt.year.dropna().unique(), reverse=True)
+            if available_years:
+                col_sel1, col_sel2 = st.columns(2)
+                with col_sel1:
+                    sel_year = st.selectbox("Wybierz rok:", available_years, key="cal_year")
+                with col_sel2:
+                    months_pl = {
+                        1: 'Styczeń', 2: 'Luty', 3: 'Marzec', 4: 'Kwiecień',
+                        5: 'Maj', 6: 'Czerwiec', 7: 'Lipiec', 8: 'Sierpień',
+                        9: 'Wrzesień', 10: 'Październik', 11: 'Listopad', 12: 'Grudzień'
+                    }
+                    sel_month = st.selectbox("Wybierz miesiąc:", options=list(months_pl.keys()), format_func=lambda x: months_pl[x], key="cal_month")
                 
-            st.divider()
-            
-            # --- CZYTELNA MAPA CIEPŁA (GITHUB STYLE) ---
-            st.markdown("### 🔥 Kalendarz Aktywności (Ostatni rok)")
-            
-            # Generujemy pełny zakres ostatnich 365 dni, żeby siatka była równa
-            end_date = datetime.date.today()
-            start_date = end_date - datetime.timedelta(days=365)
-            full_date_range = pd.date_range(start=start_date, end=end_date)
-            
-            df_full = pd.DataFrame({"DateTime": full_date_range})
-            df_full['Date'] = df_full['DateTime'].dt.date
-            
-            # Agregujemy dzienne dystanse z aktywności
-            df_daily_agg = df_acts.groupby("Date", as_index=False)["DistanceKm"].sum()
-            
-            # Łączymy z pełną siatką dni (uzupełniamy zera tam, gdzie nie było treningu)
-            df_calendar = pd.merge(df_full, df_daily_agg, on="Date", how="left").fillna(0)
-            
-            # Wyciągamy pomocnicze kolumny do układu siatki (Tydzień roku i Dzień tygodnia)
-            df_calendar['WeekOfYear'] = df_calendar['DateTime'].dt.isocalendar().week
-            # Korekta roku, jeśli tydzień 1 przypada na grudzień poprzedniego roku
-            df_calendar['Year'] = df_calendar['DateTime'].dt.year
-            df_calendar['WeekIndex'] = df_calendar['DateTime'].dt.strftime('%Y-%U')
-            
-            # Nazwy dni tygodnia po polsku
-            day_names_pl = {0: 'Poniedziałek', 1: 'Wtorek', 2: 'Środa', 3: 'Czwartek', 4: 'Piątek', 5: 'Sobota', 6: 'Niedziela'}
-            df_calendar['DayOfWeekNum'] = df_calendar['DateTime'].dt.dayofweek
-            df_calendar['DayOfWeek'] = df_calendar['DayOfWeekNum'].map(day_names_pl)
-            
-            # Sortujemy dni od poniedziałku do niedzieli
-            df_calendar.sort_values(['Year', 'WeekOfYear', 'DayOfWeekNum'], inplace=True)
-            
-            # Tworzymy wykres siatkowy (Heatmapa w układzie Tydzień vs Dzień tygodnia)
-            fig_heat = px.imshow(
-                df_calendar.pivot(index="DayOfWeek", columns="WeekIndex", values="DistanceKm"),
-                labels=dict(x="Tydzień roku", y="Dzień tygodnia", color="Dystans (km)"),
-                y=['Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek', 'Sobota', 'Niedziela'],
-                color_continuous_scale="Greens",
-                aspect="auto"
-            )
-            
-            fig_heat.update_layout(
-                title="Rozkład treningów dzień po dniu (styl GitHub)",
-                xaxis_title="Kolejne tygodnie roku",
-                yaxis_title="",
-                xaxis=dict(showticklabels=False)  # Ukrywamy numery tygodni, żeby było czysto i estetycznie
-            )
-            
-            st.plotly_chart(fig_heat, use_container_width=True)
+                st.divider()
+                
+                # Filtrujemy aktywności z wybranego miesiąca
+                month_acts = df_acts[(df_acts['DateTime'].dt.year == sel_year) & (df_acts['DateTime'].dt.month == sel_month)]
+                
+                # Tworzymy matrycę kalendarza (Tygodnie jako wiersze, Dni tygodnia jako kolumny)
+                cal = calendar.Calendar(firstweekday=0) # 0 = Poniedziałek
+                month_days = cal.monthdayscalendar(sel_year, sel_month)
+                
+                # Paleta kolorów dla sportów
+                sport_colors = {
+                    'running': '#ff4b4b',          # Czerwony
+                    'cycling': '#0068c9',          # Niebieski
+                    'mountain_biking': '#83c9ff',  # Jasnoniebieski
+                    'swimming': '#29b09d',         # Zielonawy/Morski
+                    'walking': '#ff8700',          # Pomarańczowy
+                    'hiking': '#7d38df',           # Fioletowy
+                    'strength_training': '#ff2b2b',
+                    'cardio': '#eb34db',
+                    'yoga': '#34ebd0',
+                    'Inne': '#808080'              # Szary
+                }
+                
+                # Budujemy czytelną tabelę HTML kalendarza
+                days_header = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
+                
+                html_code = f"""
+                <div style="font-family: sans-serif; background-color: #0e1117; color: #ffffff; padding: 10px; border-radius: 10px;">
+                    <h3 style="text-align: center; color: #ffffff; margin-bottom: 20px;">{months_pl[sel_month]} {sel_year}</h3>
+                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                        <thead>
+                            <tr>
+                """
+                for dh in days_header:
+                    html_code += f"<th style='padding: 10px; border: 1px solid #30333b; background-color: #1f242d; color: #9fa6b2; text-align: center; font-size: 14px;'>{dh}</th>"
+                html_code += "</tr></thead><tbody>"
+                
+                for week in month_days:
+                    html_code += "<tr>"
+                    for day in week:
+                        if day == 0:
+                            # Puste pole dla dni spoza miesiąca
+                            html_code += "<td style='height: 90px; border: 1px solid #30333b; background-color: #161920; opacity: 0.3;'></td>"
+                        else:
+                            # Szukamy aktywności w ten konkretny dzień
+                            current_date = datetime.date(sel_year, sel_month, day)
+                            day_data = month_acts[month_acts['Date'] == current_date]
+                            
+                            cell_bg = "#1f242d" # Domyślny kolor pustego dnia
+                            content = f"<div style='font-weight: bold; font-size: 13px; color: #ffffff; margin-bottom: 5px;'>{day}</div>"
+                            
+                            if not day_data.empty:
+                                # Jeśli w ten dzień było coś robione, bierzemy główny sport lub pierwszy z brzegu
+                                main_sport = day_data.iloc[0]['SportKey']
+                                sport_label = day_data.iloc[0]['SportName']
+                                total_dist = day_data['DistanceKm'].sum()
+                                
+                                cell_bg = sport_colors.get(main_sport, '#00cc66')
+                                content += f"<div style='font-size: 11px; background: rgba(0,0,0,0.3); padding: 3px; border-radius: 4px; margin-top: 2px;'>{sport_label}<br><b>{total_dist:.1f} km</b></div>"
+                            
+                            html_code += f"<td style='height: 90px; border: 1px solid #30333b; background-color: {cell_bg}; vertical-align: top; padding: 6px; text-align: left; overflow: hidden;'>{content}</td>"
+                    html_code += "</tr>"
+                
+                html_code += "</tbody></table></div>"
+                
+                components.html(html_code, height=450)
+            else:
+                st.info("Brak dat w aktywnościach.")
 
     # --- ZAKŁADKA 5: ANALIZA FORMY ---
     with tab5:
