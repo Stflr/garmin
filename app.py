@@ -167,9 +167,9 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: WYKRESY ROCZNE ---
+    # --- ZAKŁADKA 3: WYKRESY ROCZNE (LINIOWE, DOKŁADNE) ---
     with tab3:
-        st.subheader("📈 Podsumowanie dystansu (km) w rozbiciu na lata i sporty")
+        st.subheader("📈 Dokładny dystans (km) w rozbiciu na lata i sporty")
         
         chart_rows = []
         for act in st.session_state.activities:
@@ -178,30 +178,28 @@ if st.session_state.activities:
                 year = start_time[:4]
                 type_key = act.get('activityType', {}).get('typeKey', 'inne')
                 distance_m = act.get('distance', 0)
-                distance_km = distance_m / 1000 if distance_m else 0
+                distance_km = distance_m / 1000 if distance_m else 0  # Bez zaokrąglania (dokładny wynik)
                 
                 if distance_km > 0:
                     display_name = sport_names.get(type_key, type_key.replace('_', ' ').capitalize())
                     chart_rows.append({
                         "Rok": str(year),
                         "Sport": display_name,
-                        "Dystans (km)": round(distance_km, 2)
+                        "Dystans (km)": distance_km
                     })
         
         if chart_rows:
             df_chart = pd.DataFrame(chart_rows)
-            # Grupujemy i sumujemy kilometry dla każdego roku i sportu
             df_grouped = df_chart.groupby(["Rok", "Sport"], as_index=False)["Dystans (km)"].sum()
             
-            # Tworzymy interaktywny wykres słupkowy z pomocą Plotly
-            fig = px.bar(
+            # Wykres liniowy (px.line) z widocznymi punktami (markers=True)
+            fig = px.line(
                 df_grouped,
                 x="Rok",
                 y="Dystans (km)",
                 color="Sport",
-                barmode="group",
-                text_auto=".1s",
-                title="Dystans pokonany w poszczególnych latach"
+                markers=True,
+                title="Trend dystansu w poszczególnych latach"
             )
             
             fig.update_layout(
