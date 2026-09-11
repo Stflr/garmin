@@ -63,7 +63,7 @@ with st.sidebar:
                 except Exception as e:
                     st.error(f"Błąd logowania: {e}")
 
-    # --- DODATEK 4: EKSPORT DO CSV ---
+    # --- EKSPORT DO CSV ---
     if st.session_state.activities:
         st.divider()
         st.subheader("📥 Eksport danych")
@@ -187,7 +187,7 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (CIĄGŁY WYKRES) ---
+    # --- ZAKŁADKA 3: YEAR PROGRESSIONS ---
     with tab3:
         st.subheader("📈 Cumulative Distance Progressions")
         
@@ -276,18 +276,17 @@ if st.session_state.activities:
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 
-    # --- ZAKŁADKA 4: DODATEK 1 & 2 (KALENDARZ & PODSUMOWANIA) ---
+    # --- ZAKŁADKA 4: CZYTELNY KALENDARZ AKTYWNOŚCI & PODSUMOWANIA ---
     with tab4:
         st.subheader("📊 Podsumowania okresowe i Kalendarz aktywności")
         
-        # Przygotowanie danych dat
         df_acts = pd.DataFrame(st.session_state.activities)
         if not df_acts.empty and 'startTimeLocal' in df_acts.columns:
             df_acts['DateTime'] = pd.to_datetime(df_acts['startTimeLocal'], errors='coerce')
             df_acts['Date'] = df_acts['DateTime'].dt.date
             df_acts['DistanceKm'] = (df_acts['distance'].fillna(0)) / 1000
             
-            # --- KPI Tygodniowe / Miesięczne ---
+            # KPI Tygodniowe / Miesięczne
             now = datetime.datetime.now()
             current_week = now.isocalendar()[1]
             current_month = now.month
@@ -307,30 +306,61 @@ if st.session_state.activities:
                 
             st.divider()
             
-            # --- DODATEK 1: Kalendarz aktywności (Heatmapa dzienna) ---
-            st.markdown("### 🔥 Kalendarz Aktywności (Dzienna objętość)")
-            df_daily = df_acts.groupby("Date", as_index=False)["DistanceKm"].sum()
+            # --- CZYTELNA MAPA CIEPŁA (GITHUB STYLE) ---
+            st.markdown("### 🔥 Kalendarz Aktywności (Ostatni rok)")
             
-            if not df_daily.empty:
-                fig_heat = px.density_heatmap(
-                    df_daily,
-                    x="Date",
-                    y="DistanceKm",
-                    z="DistanceKm",
-                    histfunc="sum",
-                    title="Aktywność treningowa w czasie",
-                    labels={"Date": "Data", "DistanceKm": "Dystans (km)"},
-                    color_continuous_scale="Greens"
-                )
-                st.plotly_chart(fig_heat, use_container_width=True)
+            # Generujemy pełny zakres ostatnich 365 dni, żeby siatka była równa
+            end_date = datetime.date.today()
+            start_date = end_date - datetime.timedelta(days=365)
+            full_date_range = pd.date_range(start=start_date, end=end_date)
+            
+            df_full = pd.DataFrame({"DateTime": full_date_range})
+            df_full['Date'] = df_full['DateTime'].dt.date
+            
+            # Agregujemy dzienne dystanse z aktywności
+            df_daily_agg = df_acts.groupby("Date", as_index=False)["DistanceKm"].sum()
+            
+            # Łączymy z pełną siatką dni (uzupełniamy zera tam, gdzie nie było treningu)
+            df_calendar = pd.merge(df_full, df_daily_agg, on="Date", how="left").fillna(0)
+            
+            # Wyciągamy pomocnicze kolumny do układu siatki (Tydzień roku i Dzień tygodnia)
+            df_calendar['WeekOfYear'] = df_calendar['DateTime'].dt.isocalendar().week
+            # Korekta roku, jeśli tydzień 1 przypada na grudzień poprzedniego roku
+            df_calendar['Year'] = df_calendar['DateTime'].dt.year
+            df_calendar['WeekIndex'] = df_calendar['DateTime'].dt.strftime('%Y-%U')
+            
+            # Nazwy dni tygodnia po polsku
+            day_names_pl = {0: 'Poniedziałek', 1: 'Wtorek', 2: 'Środa', 3: 'Czwartek', 4: 'Piątek', 5: 'Sobota', 6: 'Niedziela'}
+            df_calendar['DayOfWeekNum'] = df_calendar['DateTime'].dt.dayofweek
+            df_calendar['DayOfWeek'] = df_calendar['DayOfWeekNum'].map(day_names_pl)
+            
+            # Sortujemy dni od poniedziałku do niedzieli
+            df_calendar.sort_values(['Year', 'WeekOfYear', 'DayOfWeekNum'], inplace=True)
+            
+            # Tworzymy wykres siatkowy (Heatmapa w układzie Tydzień vs Dzień tygodnia)
+            fig_heat = px.imshow(
+                df_calendar.pivot(index="DayOfWeek", columns="WeekIndex", values="DistanceKm"),
+                labels=dict(x="Tydzień roku", y="Dzień tygodnia", color="Dystans (km)"),
+                y=['Poniedziałek', 'Wtorek', 'Środa', 'Czwartek', 'Piątek', 'Sobota', 'Niedziela'],
+                color_continuous_scale="Greens",
+                aspect="auto"
+            )
+            
+            fig_heat.update_layout(
+                title="Rozkład treningów dzień po dniu (styl GitHub)",
+                xaxis_title="Kolejne tygodnie roku",
+                yaxis_title="",
+                xaxis=dict(showticklabels=False)  # Ukrywamy numery tygodni, żeby było czysto i estetycznie
+            )
+            
+            st.plotly_chart(fig_heat, use_container_width=True)
 
-    # --- ZAKŁADKA 5: DODATEK 3 (ANALIZA KONDYCJI I TĘTNA) ---
+    # --- ZAKŁADKA 5: ANALIZA FORMY ---
     with tab5:
         st.subheader("❤️ Analiza tętna i stref wysiłkowych")
         
         df_acts = pd.DataFrame(st.session_state.activities)
         if not df_acts.empty and 'averageHR' in df_acts.columns:
-            # Filtrujemy aktywności z tętnem
             df_hr = df_acts.dropna(subset=['averageHR', 'startTimeLocal']).copy()
             df_hr['Date'] = pd.to_datetime(df_hr['startTimeLocal']).dt.date
             df_hr['Sport'] = df_hr['activityType'].apply(lambda x: x.get('typeKey') if isinstance(x, dict) else 'Inne')
@@ -346,7 +376,6 @@ if st.session_state.activities:
             )
             st.plotly_chart(fig_hr, use_container_width=True)
             
-            # Dodatkowe rozbicie na dystans / tętno
             st.markdown("### 📊 Rozkład średniego tętna wg sportów")
             fig_box = px.box(
                 df_hr,
