@@ -277,7 +277,7 @@ if st.session_state.activities:
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 
-    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (WIELE AKTYWNOŚCI + STATYSTYKY) ---
+    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (Z FILTREM DYSCYPLINY DO STATYSTYK) ---
     with tab4:
         st.subheader("📅 Kalendarz Aktywności Miesięcznej i Porównania")
         
@@ -293,7 +293,8 @@ if st.session_state.activities:
             
             available_years = sorted(df_acts['Year'].dropna().unique(), reverse=True)
             if available_years:
-                col_sel1, col_sel2 = st.columns(2)
+                # Wiersz wyboru roku, miesiąca oraz dyscypliny do statystyk kilometrów
+                col_sel1, col_sel2, col_sel3 = st.columns(3)
                 with col_sel1:
                     sel_year = st.selectbox("Wybierz rok:", available_years, key="cal_year")
                 with col_sel2:
@@ -303,28 +304,44 @@ if st.session_state.activities:
                         9: 'Wrzesień', 10: 'Październik', 11: 'Listopad', 12: 'Grudzień'
                     }
                     sel_month = st.selectbox("Wybierz miesiąc:", options=list(months_pl.keys()), format_func=lambda x: months_pl[x], key="cal_month")
+                with col_sel3:
+                    stat_sport_option = st.selectbox(
+                        "Dystans do podsumowania:",
+                        options=['all', 'running', 'cycling'],
+                        format_func=lambda x: {
+                            'all': '🌟 Wszystkie sporty', 
+                            'running': '🏃 Tylko bieganie', 
+                            'cycling': '🚴 Tylko kolarstwo'
+                        }[x],
+                        key="stat_sport_filter"
+                    )
                 
                 st.divider()
                 
-                # Obliczenia statystyk miesiąca i roku
-                current_month_acts = df_acts[(df_acts['Year'] == sel_year) & (df_acts['Month'] == sel_month)]
+                # Filtrowanie ramki danych pod kątem wybranej dyscypliny do statystyk kilometrowych
+                if stat_sport_option == 'running':
+                    df_stat_acts = df_acts[df_acts['SportKey'].isin(['running', 'treadmill_running'])]
+                elif stat_sport_option == 'cycling':
+                    df_stat_acts = df_acts[df_acts['SportKey'].isin(['cycling', 'mountain_biking'])]
+                else:
+                    df_stat_acts = df_acts
+                
+                # Obliczenia statystyk miesiąca i roku na podstawie wybranej dyscypliny
+                current_month_acts = df_stat_acts[(df_stat_acts['Year'] == sel_year) & (df_stat_acts['Month'] == sel_month)]
                 current_month_dist = current_month_acts['DistanceKm'].sum()
                 
-                # Poprzedni rok - ten sam miesiąc
                 prev_year = sel_year - 1
-                prev_month_acts = df_acts[(df_acts['Year'] == prev_year) & (df_acts['Month'] == sel_month)]
+                prev_month_acts = df_stat_acts[(df_stat_acts['Year'] == prev_year) & (df_stat_acts['Month'] == sel_month)]
                 prev_month_dist = prev_month_acts['DistanceKm'].sum()
                 month_diff = current_month_dist - prev_month_dist
                 
-                # Cały rok vs poprzedni rok
-                current_year_acts = df_acts[df_acts['Year'] == sel_year]
+                current_year_acts = df_stat_acts[df_stat_acts['Year'] == sel_year]
                 current_year_dist = current_year_acts['DistanceKm'].sum()
                 
-                prev_year_acts = df_acts[df_acts['Year'] == prev_year]
+                prev_year_acts = df_stat_acts[df_stat_acts['Year'] == prev_year]
                 prev_year_dist = prev_year_acts['DistanceKm'].sum()
                 year_diff = current_year_dist - prev_year_dist
                 
-                # Wyświetlenie metryk porównawczych
                 m_col1, m_col2 = st.columns(2)
                 with m_col1:
                     st.metric(
@@ -341,7 +358,9 @@ if st.session_state.activities:
                 
                 st.divider()
                 
-                # Generowanie kalendarza kafelkowego
+                # Do samego kalendarza wyświetlamy wszystkie aktywności danego miesiąca
+                calendar_month_acts = df_acts[(df_acts['Year'] == sel_year) & (df_acts['Month'] == sel_month)]
+                
                 cal = calendar.Calendar(firstweekday=0)
                 month_days = cal.monthdayscalendar(sel_year, sel_month)
                 
@@ -375,20 +394,18 @@ if st.session_state.activities:
                     html_code += "<tr>"
                     for day in week:
                         if day == 0:
-                            html_code += "<td style='height: 95px; border: 1px solid #30333b; background-color: #161920; opacity: 0.3;'></td>"
+                            html_code += "<td style='height: 85px; border: 1px solid #30333b; background-color: #161920; opacity: 0.3;'></td>"
                         else:
                             current_date = datetime.date(sel_year, sel_month, day)
-                            day_data = current_month_acts[current_month_acts['Date'] == current_date]
+                            day_data = calendar_month_acts[calendar_month_acts['Date'] == current_date]
                             
                             cell_bg = "#1f242d"
                             content = f"<div style='font-weight: bold; font-size: 12px; color: #ffffff; margin-bottom: 2px;'>{day}</div>"
                             
                             if not day_data.empty:
-                                # Używamy koloru pierwszej aktywności jako tła komórki
                                 main_sport = day_data.iloc[0]['SportKey']
                                 cell_bg = sport_colors.get(main_sport, '#00cc66')
                                 
-                                # Renderujemy WSZYSTKIE aktywności z danego dnia
                                 for _, act_row in day_data.iterrows():
                                     sport_label = act_row['SportName']
                                     dist = act_row['DistanceKm']
@@ -404,12 +421,12 @@ if st.session_state.activities:
                                     else:
                                         content += f"<div style='font-size: 9px; background: rgba(0,0,0,0.35); padding: 2px; border-radius: 3px; margin-top: 2px;'>{sport_label}<br><b>{dist:.1f} km</b></div>"
                             
-                            html_code += f"<td style='height: 95px; border: 1px solid #30333b; background-color: {cell_bg}; vertical-align: top; padding: 4px; text-align: left; overflow: hidden;'>{content}</td>"
+                            html_code += f"<td style='height: 85px; border: 1px solid #30333b; background-color: {cell_bg}; vertical-align: top; padding: 4px; text-align: left; overflow: hidden;'>{content}</td>"
                     html_code += "</tr>"
                 
                 html_code += "</tbody></table></div>"
                 
-                components.html(html_code, height=450)
+                components.html(html_code, height=560)
             else:
                 st.info("Brak dat w aktywnościach.")
 
