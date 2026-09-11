@@ -16,7 +16,7 @@ if "stats" not in st.session_state:
 
 st.title("🏃 Garmin Activity Dashboard")
 
-# Słownik ładnych nazw i ikon dla sportów (globalny)
+# Słownik ładnych nazw i ikon dla sportów
 sport_names = {
     'running': '🏃 Bieganie',
     'cycling': '🚴 Kolarstwo',
@@ -75,7 +75,7 @@ if st.session_state.activities:
     st.divider()
     
     # Trzy zakładki
-    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Wykres Roczny (Narastający)"])
+    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Porównanie Lat (Progressions)"])
     
     # --- ZAKŁADKA 1: MAPA ---
     with tab1:
@@ -167,91 +167,112 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: WYKRES ROCZNY NARASTAJĄCY ---
+    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (WIELE LAT NA JEDNYM WYKRESIE) ---
     with tab3:
-        st.subheader("📈 Narastający dystans w wybranym roku (podsumowanie roczne)")
+        st.subheader("📈 Cumulative Distance Progressions (Wszystkie lata na jednym wykresie)")
         
-        years = set()
-        for act in st.session_state.activities:
-            st_time = act.get('startTimeLocal')
-            if st_time and len(st_time) >= 4:
-                years.add(st_time[:4])
+        # Opcjonalny filtr sportów do wykresu
+        all_sport_keys = list(set([act.get('activityType', {}).get('typeKey', 'inne') for act in st.session_state.activities]))
+        selected_chart_sports = st.multiselect(
+            "Filtruj sporty do wykresu postępów:",
+            options=all_sport_keys,
+            default=all_sport_keys,
+            format_func=lambda x: sport_names.get(x, f"🎯 {x.replace('_', ' ').capitalize()}")
+        )
         
-        available_years = sorted(list(years), reverse=True)
+        filtered_progress_acts = [
+            act for act in st.session_state.activities 
+            if act.get('activityType', {}).get('typeKey', 'inne') in selected_chart_sports
+        ]
         
-        if available_years:
-            selected_year = st.selectbox("Wybierz rok do analizy:", available_years)
-            
-            year_acts = [act for act in st.session_state.activities if act.get('startTimeLocal', '').startswith(selected_year)]
-            
-            chart_rows = []
-            active_sports = set()
-            for act in year_acts:
-                start_time = act.get('startTimeLocal')
-                if start_time and len(start_time) >= 7:
-                    month = start_time[5:7]
-                    type_key = act.get('activityType', {}).get('typeKey', 'inne')
-                    distance_m = act.get('distance', 0)
-                    distance_km = distance_m / 1000 if distance_m else 0
-                    
+        if filtered_progress_acts:
+            # Przygotowujemy codzienne dane dla każdego roku
+            daily_records = []
+            for act in filtered_progress_acts:
+                st_time = act.get('startTimeLocal')
+                if st_time and len(st_time) >= 10:
+                    date_str = st_time[:10]  # "YYYY-MM-DD"
+                    year = date_str[:4]
+                    # Tworzymy datę "zamienną" na rok 2024 (rok przestępny, żeby obsłużyć 29 lutego), 
+                    # żeby wszystkie lata nałożyły się na tę samą oś X (od 1 stycznia do 31 grudnia)
+                    try:
+                        dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                        normalized_date = dt.replace(year=2024).strftime("%m-%d")
+                    except:
+                        continue
+                        
+                    distance_km = (act.get('distance') or 0) / 1000
                     if distance_km > 0:
-                        display_name = sport_names.get(type_key, type_key.replace('_', ' ').capitalize())
-                        active_sports.add(display_name)
-                        chart_rows.append({
-                            "Miesiąc_Num": month,
-                            "Sport": display_name,
-                            "Dystans (km)": distance_km
+                        daily_records.append({
+                            "Year": str(year),
+                            "NormalizedDate": normalized_date,
+                            "OriginalDate": date_str,
+                            "Distance": distance_km
                         })
             
-            if chart_rows:
-                df_chart = pd.DataFrame(chart_rows)
-                df_grouped = df_chart.groupby(["Miesiąc_Num", "Sport"], as_index=False)["Dystans (km)"].sum()
+            if daily_records:
+                df_prog = pd.DataFrame(daily_records)
                 
-                months_map = {
-                    '01': 'Styczeń', '02': 'Luty', '03': 'Marzec', '04': 'Kwiecień',
-                    '05': 'Maj', '06': 'Czerwiec', '07': 'Lipiec', '08': 'Sierpień',
-                    '09': 'Wrzesień', '10': 'Październik', '11': 'Listopad', '12': 'Grudzień'
-                }
+                # Agregujemy dystans dzienny per Rok i Znormalizowana Data
+                df_daily_sum = df_prog.groupby(["Year", "NormalizedDate"], as_index=False)["Distance"].sum()
+                df_daily_sum = df_daily_sum.sort_values(["Year", "NormalizedDate"])
                 
-                full_grid = []
-                for sport in active_sports:
-                    for m_num, m_name in months_map.items():
-                        match = df_grouped[(df_grouped["Miesiąc_Num"] == m_num) & (df_grouped["Sport"] == sport)]
-                        dist = match["Dystans (km)"].values[0] if not match.empty else 0.0
-                        full_grid.append({
-                            "Miesiąc_Num": m_num,
-                            "Miesiąc": m_name,
-                            "Sport": sport,
-                            "Dystans (km)": dist
+                # Obliczamy sumę kumulatywną (narastającą) osobno dla każdego roku
+                df_daily_sum["CumulativeDistance"] = df_daily_sum.groupby("Year")["Distance"].cumsum()
+                
+                # Generujemy pełną siatkę dni dla każdego roku obecnego w danych, aby linie były płynne
+                years_present = sorted(df_daily_sum["Year"].unique())
+                full_calendar = []
+                
+                # Tworzymy wzorcowy rok 2024 (dni od 01-01 do 12-31)
+                date_range = pd.date_range(start="2024-01-01", end="2024-12-31").strftime("%m-%d").tolist()
+                
+                for yr in years_present:
+                    yr_subset = df_daily_sum[df_daily_sum["Year"] == yr]
+                    running_total = 0.0
+                    dict_yr = dict(zip(yr_subset["NormalizedDate"], yr_subset["CumulativeDistance"]))
+                    
+                    for d in date_range:
+                        if d in dict_yr:
+                            running_total = dict_yr[d]
+                        full_calendar.append({
+                            "Year": yr,
+                            "NormalizedDate": d,
+                            "CumulativeDistance": running_total
                         })
+                        
+                df_final_plot = pd.DataFrame(full_calendar)
                 
-                df_full = pd.DataFrame(full_grid)
-                df_full = df_full.sort_values(["Sport", "Miesiąc_Num"])
-                
-                # Kluczowa zmiana: obliczenie sumy kumulatywnej (narastającej) dla każdego sportu
-                df_full["Dystans (km)"] = df_full.groupby("Sport")["Dystans (km)"].cumsum()
-                
+                # Tworzymy wykres Plotly przypominający VeloViewer
                 fig = px.line(
-                    df_full,
-                    x="Miesiąc",
-                    y="Dystans (km)",
-                    color="Sport",
-                    markers=True,
-                    title=f"Narastający dystans w roku {selected_year}"
+                    df_final_plot,
+                    x="NormalizedDate",
+                    y="CumulativeDistance",
+                    color="Year",
+                    title="Cumulative Distance in kilometers",
+                    labels={"NormalizedDate": "Dzień roku", "CumulativeDistance": "Łączny dystans (km)", "Year": "Rok"}
                 )
                 
+                # Ładne formatowanie osi X (pokazujące miesiące zamiast dat mm-dd)
+                month_ticks = ["01-01", "02-01", "03-01", "04-01", "05-01", "06-01", "07-01", "08-01", "09-01", "10-01", "11-01", "12-01"]
+                month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+                
                 fig.update_layout(
-                    xaxis_title="Miesiąc",
-                    yaxis_title="Łączny dystans narastająco (km)",
-                    legend_title="Dyscyplina",
+                    xaxis=dict(
+                        tickmode="array",
+                        tickvals=month_ticks,
+                        ticktext=month_labels,
+                        title=""
+                    ),
+                    yaxis_title="Cumulative Distance (km)",
                     hovermode="x unified",
-                    xaxis={'categoryorder': 'array', 'categoryarray': list(months_map.values())}
+                    legend_title="Years"
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info(f"Brak danych o dystansie dla roku {selected_year}.")
+                st.info("Brak wystarczających danych o dystansie do zbudowania wykresów rocznych.")
         else:
-            st.info("Brak danych o latach w aktywnościach.")
+            st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 else:
     st.info("👈 Zaloguj się do Garmina w panelu bocznym, aby uruchomić aplikację.")
