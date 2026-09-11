@@ -75,7 +75,7 @@ if st.session_state.activities:
     st.divider()
     
     # Trzy zakładki
-    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Wykres Roczny (Miesiąc po miesiącu)"])
+    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Wykres Roczny (Narastający)"])
     
     # --- ZAKŁADKA 1: MAPA ---
     with tab1:
@@ -167,11 +167,10 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: WYKRES MIESIĘCZNY DLA WYBRANEGO ROKU ---
+    # --- ZAKŁADKA 3: WYKRES ROCZNY NARASTAJĄCY ---
     with tab3:
-        st.subheader("📈 Dokładny dystans miesiąc po miesiącu w wybranym roku")
+        st.subheader("📈 Narastający dystans w wybranym roku (podsumowanie roczne)")
         
-        # Wyciągamy dostępne lata z aktywności
         years = set()
         for act in st.session_state.activities:
             st_time = act.get('startTimeLocal')
@@ -183,7 +182,6 @@ if st.session_state.activities:
         if available_years:
             selected_year = st.selectbox("Wybierz rok do analizy:", available_years)
             
-            # Filtrujemy aktywności tylko dla wybranego roku
             year_acts = [act for act in st.session_state.activities if act.get('startTimeLocal', '').startswith(selected_year)]
             
             chart_rows = []
@@ -191,7 +189,7 @@ if st.session_state.activities:
             for act in year_acts:
                 start_time = act.get('startTimeLocal')
                 if start_time and len(start_time) >= 7:
-                    month = start_time[5:7]  # Pobieramy numer miesiąca ("01", "02" itd.)
+                    month = start_time[5:7]
                     type_key = act.get('activityType', {}).get('typeKey', 'inne')
                     distance_m = act.get('distance', 0)
                     distance_km = distance_m / 1000 if distance_m else 0
@@ -209,14 +207,12 @@ if st.session_state.activities:
                 df_chart = pd.DataFrame(chart_rows)
                 df_grouped = df_chart.groupby(["Miesiąc_Num", "Sport"], as_index=False)["Dystans (km)"].sum()
                 
-                # Słownik pełnych nazw miesięcy, aby linijka leciała od Stycznia do Grudnia
                 months_map = {
                     '01': 'Styczeń', '02': 'Luty', '03': 'Marzec', '04': 'Kwiecień',
                     '05': 'Maj', '06': 'Czerwiec', '07': 'Lipiec', '08': 'Sierpień',
                     '09': 'Wrzesień', '10': 'Październik', '11': 'Listopad', '12': 'Grudzień'
                 }
                 
-                # Budujemy pełną siatkę miesięcy dla każdego sportu (uzupełnienie zerami, żeby linia szła poprawnie)
                 full_grid = []
                 for sport in active_sports:
                     for m_num, m_name in months_map.items():
@@ -230,21 +226,23 @@ if st.session_state.activities:
                         })
                 
                 df_full = pd.DataFrame(full_grid)
-                df_full = df_full.sort_values("Miesiąc_Num")
+                df_full = df_full.sort_values(["Sport", "Miesiąc_Num"])
                 
-                # Tworzymy wykres liniowy
+                # Kluczowa zmiana: obliczenie sumy kumulatywnej (narastającej) dla każdego sportu
+                df_full["Dystans (km)"] = df_full.groupby("Sport")["Dystans (km)"].cumsum()
+                
                 fig = px.line(
                     df_full,
                     x="Miesiąc",
                     y="Dystans (km)",
                     color="Sport",
                     markers=True,
-                    title=f"Aktywność w roku {selected_year}"
+                    title=f"Narastający dystans w roku {selected_year}"
                 )
                 
                 fig.update_layout(
                     xaxis_title="Miesiąc",
-                    yaxis_title="Dystans (km)",
+                    yaxis_title="Łączny dystans narastająco (km)",
                     legend_title="Dyscyplina",
                     hovermode="x unified",
                     xaxis={'categoryorder': 'array', 'categoryarray': list(months_map.values())}
