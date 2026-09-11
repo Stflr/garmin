@@ -89,11 +89,12 @@ if st.session_state.activities:
     
     st.divider()
     
-    # Rozbudowane zakładki
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # Rozbudowane zakładki (dodana zakładka Tygodniowy Kilometraż)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📍 Mapa", 
         "🏆 Wyniki", 
         "📈 Postępy Lat", 
+        "📊 Tygodniowy Kilometraż",
         "🔥 Kalendarz Miesięczny", 
         "❤️ Analiza Formy"
     ])
@@ -277,8 +278,102 @@ if st.session_state.activities:
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 
-    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY + PODSUMOWANIE TYGODNIOWE ---
+    # --- ZAKŁADKA 4: TYGODNIOWY KILOMETRAŻ (NOWOŚĆ) ---
     with tab4:
+        st.subheader("📊 Wykres Tygodniowego Kilometrażu (Objętość Treningowa)")
+        
+        df_acts = pd.DataFrame(st.session_state.activities)
+        if not df_acts.empty and 'startTimeLocal' in df_acts.columns:
+            df_acts['DateTime'] = pd.to_datetime(df_acts['startTimeLocal'], errors='coerce')
+            df_acts['DistanceKm'] = (df_acts['distance'].fillna(0)) / 1000
+            df_acts['DurationSec'] = df_acts['duration'].fillna(0)
+            df_acts['SportKey'] = df_acts['activityType'].apply(lambda x: x.get('typeKey', 'Inne') if isinstance(x, dict) else 'Inne')
+            
+            # Dodatkowy filtr dyscypliny dla wykresów tygodniowych
+            col_w1, col_w2 = st.columns([2, 2])
+            with col_w1:
+                weekly_sport_option = st.selectbox(
+                    "Wybierz dyscyplinę do wykresu tygodniowego:",
+                    options=['all', 'running', 'cycling'],
+                    format_func=lambda x: {
+                        'all': '🌟 Wszystkie sporty', 
+                        'running': '🏃 Tylko bieganie', 
+                        'cycling': '🚴 Tylko kolarstwo'
+                    }[x],
+                    key="weekly_sport_filter"
+                )
+            with col_w2:
+                time_range_option = st.selectbox(
+                    "Okres wstecz:",
+                    options=[12, 26, 52, 104, 999],
+                    format_func=lambda x: {
+                        12: 'Ostatnie 3 miesiące (12 tyg.)',
+                        26: 'Ostatnie pół roku (26 tyg.)',
+                        52: 'Ostatni rok (52 tyg.)',
+                        104: 'Ostatnie 2 lata (104 tyg.)',
+                        999: 'Cała historia'
+                    }[x],
+                    key="weekly_range_filter"
+                )
+            
+            # Filtrowanie po sporcie
+            if weekly_sport_option == 'running':
+                df_w = df_acts[df_acts['SportKey'].isin(['running', 'treadmill_running'])].copy()
+            elif weekly_sport_option == 'cycling':
+                df_w = df_acts[df_acts['SportKey'].isin(['cycling', 'mountain_biking'])].copy()
+            else:
+                df_w = df_acts.copy()
+                
+            if not df_w.empty:
+                # Grupowanie po tygodniu (start tygodnia jako poniedziałek)
+                df_w['WeekStart'] = df_w['DateTime'] - pd.to_timedelta(df_w['DateTime'].dt.weekday, unit='d')
+                df_w['WeekStart'] = df_w['WeekStart'].dt.date
+                
+                weekly_grouped = df_w.groupby('WeekStart').agg(
+                    TotalDistance=('DistanceKm', 'sum'),
+                    ActivityCount=('activityId', 'count'),
+                    TotalDuration=('DurationSec', 'sum')
+                ).reset_index()
+                
+                weekly_grouped = weekly_grouped.sort_values('WeekStart')
+                
+                # Ograniczenie liczby tygodni wstecz jeśli wybrano
+                if time_range_option != 999 and len(weekly_grouped) > time_range_option:
+                    weekly_grouped = weekly_grouped.tail(time_range_option)
+                
+                weekly_grouped['WeekLabel'] = weekly_grouped['WeekStart'].apply(lambda d: f"Tydz. od {d.strftime('%d.%m.%Y')}")
+                
+                fig_weekly = px.bar(
+                    weekly_grouped,
+                    x='WeekStart',
+                    y='TotalDistance',
+                    title="Suma dystansu w poszczególnych tygodniach",
+                    labels={'WeekStart': 'Początek tygodnia (Poniedziałek)', 'TotalDistance': 'Dystans (km)'},
+                    text_auto='.1f'
+                )
+                
+                fig_weekly.update_traces(marker_color='#0068c9', textposition='outside')
+                fig_weekly.update_layout(
+                    xaxis=dict(type='category'),
+                    yaxis_title="Dystans (km)",
+                    hovermode="x unified"
+                )
+                
+                st.plotly_chart(fig_weekly, use_container_width=True)
+                
+                # Dodatkowa tabela z dokładnymi statystykami tygodniowymi
+                with st.expander("📋 Zobacz szczegółową tabelę tygodniową"):
+                    display_table = weekly_grouped[['WeekLabel', 'TotalDistance', 'ActivityCount']].copy()
+                    display_table.columns = ['Tydzień', 'Dystans (km)', 'Liczba treningów']
+                    display_table['Dystans (km)'] = display_table['Dystans (km)'].round(2)
+                    st.dataframe(display_table.sort_values('Tydzień', ascending=False), use_container_width=True, hide_index=True)
+            else:
+                st.info("Brak aktywności spełniających wybrane kryteria.")
+        else:
+            st.info("Brak danych aktywności.")
+
+    # --- ZAKŁADKA 5: KALENDARZ MIESIĘCZNY + PODSUMOWANIE TYGODNIOWE ---
+    with tab5:
         st.subheader("📅 Kalendarz Aktywności Miesięcznej i Podsumowania")
         
         df_acts = pd.DataFrame(st.session_state.activities)
@@ -358,24 +453,17 @@ if st.session_state.activities:
                 
                 st.divider()
 
-                # --- NOWOŚĆ: PODSUMOWANIE TYGODNIOWE ---
+                # Podsumowanie tygodniowe w miesiącu
                 st.markdown(f"### 📊 Podsumowanie tygodniowe w {months_pl[sel_month]} {sel_year}")
                 if not current_month_acts.empty:
-                    # Przypisanie numeru tygodnia ISO do bieżących aktywności miesiąca
                     current_month_acts = current_month_acts.copy()
-                    current_month_acts['IsoWeek'] = current_month_acts['DateTime'].dt.isocalendar().week
-                    current_month_acts['IsoYear'] = current_month_acts['DateTime'].dt.isocalendar().year
-                    
-                    # Czasami grudniowe/styczniowe dni nachodzą na sąsiedni rok w kalendarzu ISO, dopasowujemy do wybranego roku
                     weekly_summary = []
-                    # Generujemy tygodnie na podstawie dni kalendarzowych miesiąca
                     cal = calendar.Calendar(firstweekday=0)
                     month_weeks = cal.monthdatescalendar(sel_year, sel_month)
                     
                     for i, w in enumerate(month_weeks, 1):
                         w_start = w[0]
                         w_end = w[-1]
-                        # Aktywności mieszczące się w tym tygodniu (w ramach wybranego miesiąca/roku)
                         w_acts = current_month_acts[(current_month_acts['Date'] >= w_start) & (current_month_acts['Date'] <= w_end)]
                         
                         w_dist = w_acts['DistanceKm'].sum()
@@ -471,8 +559,8 @@ if st.session_state.activities:
             else:
                 st.info("Brak dat w aktywnościach.")
 
-    # --- ZAKŁADKA 5: ANALIZA FORMY ---
-    with tab5:
+    # --- ZAKŁADKA 6: ANALIZA FORMY ---
+    with tab6:
         st.subheader("❤️ Analiza tętna i stref wysiłkowych")
         
         df_acts = pd.DataFrame(st.session_state.activities)
