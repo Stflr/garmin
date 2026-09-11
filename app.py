@@ -167,7 +167,7 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (CIĄGŁY WYKRES) ---
+    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (W PEŁNI CIĄGŁY WYKRES) ---
     with tab3:
         st.subheader("📈 Cumulative Distance Progressions")
         
@@ -193,7 +193,9 @@ if st.session_state.activities:
                     year = date_str[:4]
                     try:
                         dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-                        normalized_date = dt.replace(year=2024).strftime("%m-%d")
+                        # Mapujemy każdy rok na rok przestępny 2024 jako datę pełną (np. 2024-03-11), 
+                        # żeby Plotly traktował oś X jako prawdziwą oś czasową.
+                        normalized_date = dt.replace(year=2024)
                     except:
                         continue
                         
@@ -201,52 +203,52 @@ if st.session_state.activities:
                     if distance_km > 0:
                         daily_records.append({
                             "Year": str(year),
-                            "NormalizedDate": normalized_date,
+                            "Date": normalized_date,
                             "Distance": distance_km
                         })
             
             if daily_records:
                 df_prog = pd.DataFrame(daily_records)
-                df_daily_sum = df_prog.groupby(["Year", "NormalizedDate"], as_index=False)["Distance"].sum()
+                df_daily_sum = df_prog.groupby(["Year", "Date"], as_index=False)["Distance"].sum()
                 
                 years_present = sorted(df_daily_sum["Year"].unique())
-                date_range = pd.date_range(start="2024-01-01", end="2024-12-31").strftime("%m-%d").tolist()
+                # Pełna siatka dni dla roku 2024 (każdy jeden dzień od 1 stycznia do 31 grudnia)
+                date_range = pd.date_range(start="2024-01-01", end="2024-12-31")
                 
                 full_calendar = []
                 for yr in years_present:
                     yr_subset = df_daily_sum[df_daily_sum["Year"] == yr]
-                    dict_yr = dict(zip(yr_subset["NormalizedDate"], yr_subset["Distance"]))
+                    dict_yr = dict(zip(yr_subset["Date"], yr_subset["Distance"]))
                     
                     running_total = 0.0
                     for d in date_range:
                         if d in dict_yr:
-                            running_total += dict_yr[d]  # Sumujemy narastająco każdy dzień
+                            running_total += dict_yr[d]
                         full_calendar.append({
                             "Year": yr,
-                            "NormalizedDate": d,
+                            "Date": d,
                             "CumulativeDistance": running_total
                         })
                         
                 df_final_plot = pd.DataFrame(full_calendar)
                 
+                # Tworzymy wykres liniowy z osią X typu datetime
                 fig = px.line(
                     df_final_plot,
-                    x="NormalizedDate",
+                    x="Date",
                     y="CumulativeDistance",
                     color="Year",
                     title="Cumulative Distance in kilometers",
-                    labels={"NormalizedDate": "Dzień roku", "CumulativeDistance": "Łączny dystans (km)", "Year": "Rok"}
+                    labels={"Date": "Miesiąc", "CumulativeDistance": "Łączny dystans (km)", "Year": "Rok"}
                 )
                 
-                month_ticks = ["01-01", "02-01", "03-01", "04-01", "05-01", "06-01", "07-01", "08-01", "09-01", "10-01", "11-01", "12-01"]
-                month_labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-                
+                # Ustawiamy formatowanie osi X, aby wyświetlała skróty miesięcy i była w pełni ciągła
                 fig.update_layout(
                     xaxis=dict(
-                        tickmode="array",
-                        tickvals=month_ticks,
-                        ticktext=month_labels,
-                        title=""
+                        type="date",
+                        tickformat="%b",  # Wyświetla nazwy miesięcy: Jan, Feb, Mar...
+                        dtick="M1",       # Dokładnie jeden tick na miesiąc
+                        ticklabelmode="period"
                     ),
                     yaxis_title="Cumulative Distance (km)",
                     hovermode="x unified",
