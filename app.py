@@ -277,20 +277,21 @@ if st.session_state.activities:
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
 
-    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (Z LINKAMI I ODPOWIEDNIĄ WYSOKOŚCIĄ) ---
+    # --- ZAKŁADKA 4: KALENDARZ MIESIĘCZNY (WIELE AKTYWNOŚCI + STATYSTYKY) ---
     with tab4:
-        st.subheader("📅 Kalendarz Aktywności Miesięcznej")
+        st.subheader("📅 Kalendarz Aktywności Miesięcznej i Porównania")
         
         df_acts = pd.DataFrame(st.session_state.activities)
         if not df_acts.empty and 'startTimeLocal' in df_acts.columns:
             df_acts['DateTime'] = pd.to_datetime(df_acts['startTimeLocal'], errors='coerce')
             df_acts['Date'] = df_acts['DateTime'].dt.date
+            df_acts['Year'] = df_acts['DateTime'].dt.year
+            df_acts['Month'] = df_acts['DateTime'].dt.month
             df_acts['DistanceKm'] = (df_acts['distance'].fillna(0)) / 1000
             df_acts['SportKey'] = df_acts['activityType'].apply(lambda x: x.get('typeKey', 'Inne') if isinstance(x, dict) else 'Inne')
             df_acts['SportName'] = df_acts['SportKey'].map(lambda k: sport_names.get(k, k.replace('_', ' ').capitalize()))
             
-            # Wybór roku i miesiąca przez użytkownika
-            available_years = sorted(df_acts['DateTime'].dt.year.dropna().unique(), reverse=True)
+            available_years = sorted(df_acts['Year'].dropna().unique(), reverse=True)
             if available_years:
                 col_sel1, col_sel2 = st.columns(2)
                 with col_sel1:
@@ -305,28 +306,58 @@ if st.session_state.activities:
                 
                 st.divider()
                 
-                # Filtrujemy aktywności z wybranego miesiąca
-                month_acts = df_acts[(df_acts['DateTime'].dt.year == sel_year) & (df_acts['DateTime'].dt.month == sel_month)]
+                # Obliczenia statystyk miesiąca i roku
+                current_month_acts = df_acts[(df_acts['Year'] == sel_year) & (df_acts['Month'] == sel_month)]
+                current_month_dist = current_month_acts['DistanceKm'].sum()
                 
-                # Tworzymy matrycę kalendarza (Tygodnie jako wiersze, Dni tygodnia jako kolumny)
-                cal = calendar.Calendar(firstweekday=0) # 0 = Poniedziałek
+                # Poprzedni rok - ten sam miesiąc
+                prev_year = sel_year - 1
+                prev_month_acts = df_acts[(df_acts['Year'] == prev_year) & (df_acts['Month'] == sel_month)]
+                prev_month_dist = prev_month_acts['DistanceKm'].sum()
+                month_diff = current_month_dist - prev_month_dist
+                
+                # Cały rok vs poprzedni rok
+                current_year_acts = df_acts[df_acts['Year'] == sel_year]
+                current_year_dist = current_year_acts['DistanceKm'].sum()
+                
+                prev_year_acts = df_acts[df_acts['Year'] == prev_year]
+                prev_year_dist = prev_year_acts['DistanceKm'].sum()
+                year_diff = current_year_dist - prev_year_dist
+                
+                # Wyświetlenie metryk porównawczych
+                m_col1, m_col2 = st.columns(2)
+                with m_col1:
+                    st.metric(
+                        label=f"Dystans w {months_pl[sel_month]} {sel_year}",
+                        value=f"{current_month_dist:.1f} km",
+                        delta=f"{month_diff:+.1f} km vs {prev_year}" if not prev_month_acts.empty else f"Brak danych z {prev_year}"
+                    )
+                with m_col2:
+                    st.metric(
+                        label=f"Cały rok {sel_year} (ogółem)",
+                        value=f"{current_year_dist:.1f} km",
+                        delta=f"{year_diff:+.1f} km vs {prev_year}" if not prev_year_acts.empty else f"Brak danych z {prev_year}"
+                    )
+                
+                st.divider()
+                
+                # Generowanie kalendarza kafelkowego
+                cal = calendar.Calendar(firstweekday=0)
                 month_days = cal.monthdayscalendar(sel_year, sel_month)
                 
-                # Paleta kolorów dla sportów
                 sport_colors = {
-                    'running': '#ff4b4b',          # Czerwony
-                    'cycling': '#0068c9',          # Niebieski
-                    'mountain_biking': '#83c9ff',  # Jasnoniebieski
-                    'swimming': '#29b09d',         # Zielonawy/Morski
-                    'walking': '#ff8700',          # Pomarańczowy
-                    'hiking': '#7d38df',           # Fioletowy
+                    'running': '#ff4b4b',
+                    'cycling': '#0068c9',
+                    'mountain_biking': '#83c9ff',
+                    'swimming': '#29b09d',
+                    'walking': '#ff8700',
+                    'hiking': '#7d38df',
                     'strength_training': '#ff2b2b',
                     'cardio': '#eb34db',
                     'yoga': '#34ebd0',
-                    'Inne': '#808080'              # Szary
+                    'Inne': '#808080'
                 }
                 
-                # Budujemy kompaktową tabelę HTML kalendarza
                 days_header = ["Poniedziałek", "Wtorek", "Środa", "Czwartek", "Piątek", "Sobota", "Niedziela"]
                 
                 html_code = f"""
@@ -344,42 +375,41 @@ if st.session_state.activities:
                     html_code += "<tr>"
                     for day in week:
                         if day == 0:
-                            # Puste pole dla dni spoza miesiąca
-                            html_code += "<td style='height: 75px; border: 1px solid #30333b; background-color: #161920; opacity: 0.3;'></td>"
+                            html_code += "<td style='height: 95px; border: 1px solid #30333b; background-color: #161920; opacity: 0.3;'></td>"
                         else:
-                            # Szukamy aktywności w ten konkretny dzień
                             current_date = datetime.date(sel_year, sel_month, day)
-                            day_data = month_acts[month_acts['Date'] == current_date]
+                            day_data = current_month_acts[current_month_acts['Date'] == current_date]
                             
-                            cell_bg = "#1f242d" # Domyślny kolor pustego dnia
+                            cell_bg = "#1f242d"
                             content = f"<div style='font-weight: bold; font-size: 12px; color: #ffffff; margin-bottom: 2px;'>{day}</div>"
                             
                             if not day_data.empty:
+                                # Używamy koloru pierwszej aktywności jako tła komórki
                                 main_sport = day_data.iloc[0]['SportKey']
-                                sport_label = day_data.iloc[0]['SportName']
-                                total_dist = day_data['DistanceKm'].sum()
-                                act_id = day_data.iloc[0].get('activityId')
-                                
                                 cell_bg = sport_colors.get(main_sport, '#00cc66')
                                 
-                                # Dodajemy link do Garmina jeśli jest ID aktywności
-                                if act_id:
-                                    garmin_url = f"https://connect.garmin.com/modern/activity/{act_id}"
-                                    content += f"<div style='font-size: 10px; background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 4px; margin-top: 2px; line-height: 1.2;'>" \
-                                               f"<span style='color: #ffffff;'>{sport_label}</span><br>" \
-                                               f"<b>{total_dist:.1f} km</b><br>" \
-                                               f"<a href='{garmin_url}' target='_blank' style='color: #ffffff; text-decoration: underline; font-weight: bold;'>🔗 Garmin</a>" \
-                                               f"</div>"
-                                else:
-                                    content += f"<div style='font-size: 10px; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 4px; margin-top: 2px;'>{sport_label}<br><b>{total_dist:.1f} km</b></div>"
+                                # Renderujemy WSZYSTKIE aktywności z danego dnia
+                                for _, act_row in day_data.iterrows():
+                                    sport_label = act_row['SportName']
+                                    dist = act_row['DistanceKm']
+                                    act_id = act_row.get('activityId')
+                                    
+                                    if act_id:
+                                        garmin_url = f"https://connect.garmin.com/modern/activity/{act_id}"
+                                        content += f"<div style='font-size: 9px; background: rgba(0,0,0,0.35); padding: 2px 3px; border-radius: 3px; margin-top: 2px; line-height: 1.1;'>" \
+                                                   f"<span style='color: #ffffff;'>{sport_label}</span><br>" \
+                                                   f"<b>{dist:.1f} km</b><br>" \
+                                                   f"<a href='{garmin_url}' target='_blank' style='color: #ffffff; text-decoration: underline; font-weight: bold;'>🔗 Garmin</a>" \
+                                                   f"</div>"
+                                    else:
+                                        content += f"<div style='font-size: 9px; background: rgba(0,0,0,0.35); padding: 2px; border-radius: 3px; margin-top: 2px;'>{sport_label}<br><b>{dist:.1f} km</b></div>"
                             
-                            html_code += f"<td style='height: 75px; border: 1px solid #30333b; background-color: {cell_bg}; vertical-align: top; padding: 4px; text-align: left; overflow: hidden;'>{content}</td>"
+                            html_code += f"<td style='height: 95px; border: 1px solid #30333b; background-color: {cell_bg}; vertical-align: top; padding: 4px; text-align: left; overflow: hidden;'>{content}</td>"
                     html_code += "</tr>"
                 
                 html_code += "</tbody></table></div>"
                 
-                # Zwiększona wysokość komponentu, żeby wszystko mieściło się bez suwaków
-                components.html(html_code, height=420)
+                components.html(html_code, height=450)
             else:
                 st.info("Brak dat w aktywnościach.")
 
