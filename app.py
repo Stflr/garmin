@@ -49,7 +49,7 @@ with st.sidebar:
                 try:
                     client = Garmin(garmin_email, garmin_pass)
                     client.login()
-                    st.session_state.client = client # Zapisujemy klienta do sesji
+                    st.session_state.client = client
                     
                     today = datetime.date.today().isoformat()
                     st.session_state.stats = client.get_stats(today)
@@ -106,14 +106,15 @@ if st.session_state.activities:
     
     st.divider()
     
-    # Rozbudowane zakładki
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    # Rozbudowane zakładki (dodana zakładka z listą aktywności na końcu)
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📍 Mapa", 
         "🏆 Wyniki", 
         "📈 Postępy Lat", 
         "📊 Tygodniowy Kilometraż",
         "🔥 Kalendarz Miesięczny", 
-        "❤️ Analiza Formy"
+        "❤️ Analiza Formy",
+        "📋 Lista Aktywności"
     ])
     
     # --- ZAKŁADKA 1: MAPA ---
@@ -602,6 +603,43 @@ if st.session_state.activities:
             st.plotly_chart(fig_box, use_container_width=True)
         else:
             st.info("Brak wystarczających danych tętna w pobranym strumieniu aktywności.")
+
+    # --- ZAKŁADKA 7: LISTA AKTYWNOŚCI (NOWOŚĆ) ---
+    with tab7:
+        st.subheader("📋 Pełna lista wszystkich aktywności")
+        
+        df_acts = pd.DataFrame(st.session_state.activities)
+        if not df_acts.empty and 'startTimeLocal' in df_acts.columns:
+            df_list = df_acts.copy()
+            df_list['Data i czas'] = pd.to_datetime(df_list['startTimeLocal'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
+            df_list['Nazwa'] = df_list['activityName'].fillna('Trening')
+            df_list['Sport'] = df_list['activityType'].apply(lambda x: sport_names.get(x.get('typeKey'), x.get('typeKey', 'Inne').replace('_', ' ').capitalize()) if isinstance(x, dict) else 'Inne')
+            df_list['Dystans (km)'] = (df_list['distance'].fillna(0) / 1000).round(2)
+            
+            # Formatowanie czasu trwania z sekund na format HH:MM:SS lub MM:SS
+            def format_duration(sec):
+                if pd.isna(sec) or sec == 0:
+                    return "-"
+                td = datetime.timedelta(seconds=int(sec))
+                return str(td)
+            
+            df_list['Czas trwania'] = df_list['duration'].apply(format_duration)
+            df_list['Link'] = df_list['activityId'].apply(lambda x: f"https://connect.garmin.com/modern/activity/{x}" if pd.notna(x) else None)
+            
+            # Wybór i zmiana kolejności kolumn do wyświetlenia
+            df_table_final = df_list[['Data i czas', 'Nazwa', 'Sport', 'Dystans (km)', 'Czas trwania', 'Link']].copy()
+            df_table_final = df_table_final.sort_values('Data i czas', ascending=False)
+            
+            st.dataframe(
+                df_table_final,
+                column_config={
+                    "Link": st.column_config.LinkColumn("Garmin Connect", display_text="Otwórz ↗️")
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Brak danych aktywności do wyświetlenia.")
 
 else:
     st.info("👈 Zaloguj się do Garmina w panelu bocznym, aby uruchomić aplikację.")
