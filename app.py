@@ -6,6 +6,7 @@ from garminconnect import Garmin
 import folium
 from folium.plugins import MarkerCluster
 import plotly.express as px
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Moje dane Garmin", page_icon="🏃", layout="wide")
 
@@ -31,7 +32,7 @@ sport_names = {
     'treadmill_running': '🏃‍♂️ Bieg na bieżni'
 }
 
-# Panel boczny do logowania
+# Panel boczny do logowania i narzędzi
 with st.sidebar:
     st.header("🔑 Logowanie Garmin")
     garmin_email = st.text_input("Email Garmin")
@@ -62,6 +63,19 @@ with st.sidebar:
                 except Exception as e:
                     st.error(f"Błąd logowania: {e}")
 
+    # --- DODATEK 4: EKSPORT DO CSV ---
+    if st.session_state.activities:
+        st.divider()
+        st.subheader("📥 Eksport danych")
+        df_export = pd.DataFrame(st.session_state.activities)
+        st.download_button(
+            label="Pobierz wszystkie aktywności (CSV)",
+            data=df_export.to_csv(index=False).encode('utf-8'),
+            file_name=f"garmin_activities_{datetime.date.today().isoformat()}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
 if st.session_state.activities:
     today = datetime.date.today().isoformat()
     steps = st.session_state.stats.get('totalSteps', 'Brak')
@@ -74,8 +88,14 @@ if st.session_state.activities:
     
     st.divider()
     
-    # Trzy zakładki
-    tab1, tab2, tab3 = st.tabs(["📍 Mapa Aktywności", "🏆 Moje Najlepsze Wyniki", "📊 Porównanie Lat (Progressions)"])
+    # Rozbudowane zakładki
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📍 Mapa", 
+        "🏆 Wyniki", 
+        "📈 Postępy Lat", 
+        "🔥 Kalendarz & Tydzień", 
+        "❤️ Analiza Formy"
+    ])
     
     # --- ZAKŁADKA 1: MAPA ---
     with tab1:
@@ -167,7 +187,7 @@ if st.session_state.activities:
             hide_index=True
         )
 
-    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (W PEŁNI CIĄGŁY WYKRES) ---
+    # --- ZAKŁADKA 3: YEAR PROGRESSIONS (CIĄGŁY WYKRES) ---
     with tab3:
         st.subheader("📈 Cumulative Distance Progressions")
         
@@ -193,8 +213,6 @@ if st.session_state.activities:
                     year = date_str[:4]
                     try:
                         dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-                        # Mapujemy każdy rok na rok przestępny 2024 jako datę pełną (np. 2024-03-11), 
-                        # żeby Plotly traktował oś X jako prawdziwą oś czasową.
                         normalized_date = dt.replace(year=2024)
                     except:
                         continue
@@ -212,7 +230,6 @@ if st.session_state.activities:
                 df_daily_sum = df_prog.groupby(["Year", "Date"], as_index=False)["Distance"].sum()
                 
                 years_present = sorted(df_daily_sum["Year"].unique())
-                # Pełna siatka dni dla roku 2024 (każdy jeden dzień od 1 stycznia do 31 grudnia)
                 date_range = pd.date_range(start="2024-01-01", end="2024-12-31")
                 
                 full_calendar = []
@@ -232,7 +249,6 @@ if st.session_state.activities:
                         
                 df_final_plot = pd.DataFrame(full_calendar)
                 
-                # Tworzymy wykres liniowy z osią X typu datetime
                 fig = px.line(
                     df_final_plot,
                     x="Date",
@@ -242,12 +258,11 @@ if st.session_state.activities:
                     labels={"Date": "Miesiąc", "CumulativeDistance": "Łączny dystans (km)", "Year": "Rok"}
                 )
                 
-                # Ustawiamy formatowanie osi X, aby wyświetlała skróty miesięcy i była w pełni ciągła
                 fig.update_layout(
                     xaxis=dict(
                         type="date",
-                        tickformat="%b",  # Wyświetla nazwy miesięcy: Jan, Feb, Mar...
-                        dtick="M1",       # Dokładnie jeden tick na miesiąc
+                        tickformat="%b",
+                        dtick="M1",
                         ticklabelmode="period"
                     ),
                     yaxis_title="Cumulative Distance (km)",
@@ -260,5 +275,89 @@ if st.session_state.activities:
                 st.info("Brak wystarczających danych o dystansie do zbudowania wykresów.")
         else:
             st.info("Zaznacz przynajmniej jeden sport w filtrze powyżej.")
+
+    # --- ZAKŁADKA 4: DODATEK 1 & 2 (KALENDARZ & PODSUMOWANIA) ---
+    with tab4:
+        st.subheader("📊 Podsumowania okresowe i Kalendarz aktywności")
+        
+        # Przygotowanie danych dat
+        df_acts = pd.DataFrame(st.session_state.activities)
+        if not df_acts.empty and 'startTimeLocal' in df_acts.columns:
+            df_acts['DateTime'] = pd.to_datetime(df_acts['startTimeLocal'], errors='coerce')
+            df_acts['Date'] = df_acts['DateTime'].dt.date
+            df_acts['DistanceKm'] = (df_acts['distance'].fillna(0)) / 1000
+            
+            # --- KPI Tygodniowe / Miesięczne ---
+            now = datetime.datetime.now()
+            current_week = now.isocalendar()[1]
+            current_month = now.month
+            current_year = now.year
+            
+            this_week_dist = df_acts[(df_acts['DateTime'].dt.isocalendar().week == current_week) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
+            last_week_dist = df_acts[(df_acts['DateTime'].dt.isocalendar().week == current_week - 1) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
+            
+            this_month_dist = df_acts[(df_acts['DateTime'].dt.month == current_month) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
+            last_month_dist = df_acts[(df_acts['DateTime'].dt.month == current_month - 1) & (df_acts['DateTime'].dt.year == current_year)]['DistanceKm'].sum()
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("🏃 Dystans w tym tygodniu", f"{this_week_dist:.1f} km", delta=f"{this_week_dist - last_week_dist:.1f} km vs pop. tydzień")
+            with col_b:
+                st.metric("📅 Dystans w tym miesiącu", f"{this_month_dist:.1f} km", delta=f"{this_month_dist - last_month_dist:.1f} km vs pop. miesiąc")
+                
+            st.divider()
+            
+            # --- DODATEK 1: Kalendarz aktywności (Heatmapa dzienna) ---
+            st.markdown("### 🔥 Kalendarz Aktywności (Dzienna objętość)")
+            df_daily = df_acts.groupby("Date", as_index=False)["DistanceKm"].sum()
+            
+            if not df_daily.empty:
+                fig_heat = px.density_heatmap(
+                    df_daily,
+                    x="Date",
+                    y="DistanceKm",
+                    z="DistanceKm",
+                    histfunc="sum",
+                    title="Aktywność treningowa w czasie",
+                    labels={"Date": "Data", "DistanceKm": "Dystans (km)"},
+                    color_continuous_scale="Greens"
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
+
+    # --- ZAKŁADKA 5: DODATEK 3 (ANALIZA KONDYCJI I TĘTNA) ---
+    with tab5:
+        st.subheader("❤️ Analiza tętna i stref wysiłkowych")
+        
+        df_acts = pd.DataFrame(st.session_state.activities)
+        if not df_acts.empty and 'averageHR' in df_acts.columns:
+            # Filtrujemy aktywności z tętnem
+            df_hr = df_acts.dropna(subset=['averageHR', 'startTimeLocal']).copy()
+            df_hr['Date'] = pd.to_datetime(df_hr['startTimeLocal']).dt.date
+            df_hr['Sport'] = df_hr['activityType'].apply(lambda x: x.get('typeKey') if isinstance(x, dict) else 'Inne')
+            
+            fig_hr = px.scatter(
+                df_hr,
+                x="Date",
+                y="averageHR",
+                color="Sport",
+                hover_data=["activityName", "distance"],
+                title="Średnie tętno treningów w czasie",
+                labels={"Date": "Data", "averageHR": "Średnie tętno (bpm)", "Sport": "Dyscyplina"}
+            )
+            st.plotly_chart(fig_hr, use_container_width=True)
+            
+            # Dodatkowe rozbicie na dystans / tętno
+            st.markdown("### 📊 Rozkład średniego tętna wg sportów")
+            fig_box = px.box(
+                df_hr,
+                x="Sport",
+                y="averageHR",
+                color="Sport",
+                title="Rozpiętość tętna dla poszczególnych dyscyplin"
+            )
+            st.plotly_chart(fig_box, use_container_width=True)
+        else:
+            st.info("Brak wystarczających danych tętna w pobranym strumieniu aktywności.")
+
 else:
     st.info("👈 Zaloguj się do Garmina w panelu bocznym, aby uruchomić aplikację.")
