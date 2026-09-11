@@ -15,6 +15,8 @@ if "activities" not in st.session_state:
     st.session_state.activities = []
 if "stats" not in st.session_state:
     st.session_state.stats = {}
+if "client" not in st.session_state:
+    st.session_state.client = None
 
 st.title("🏃 Garmin Activity Dashboard")
 
@@ -47,6 +49,8 @@ with st.sidebar:
                 try:
                     client = Garmin(garmin_email, garmin_pass)
                     client.login()
+                    st.session_state.client = client # Zapisujemy klienta do sesji
+                    
                     today = datetime.date.today().isoformat()
                     st.session_state.stats = client.get_stats(today)
                     
@@ -63,6 +67,19 @@ with st.sidebar:
                     st.success("Dane pobrane pomyślnie!")
                 except Exception as e:
                     st.error(f"Błąd logowania: {e}")
+
+    # --- ODŚWIEŻANIE DZISIEJSZYCH KROKÓW ---
+    if st.session_state.client:
+        st.divider()
+        if st.button("🔄 Odśwież dzisiejsze kroki"):
+            with st.spinner("Pobieranie aktualnych kroków..."):
+                try:
+                    today = datetime.date.today().isoformat()
+                    st.session_state.stats = st.session_state.client.get_stats(today)
+                    st.success("Dzisiejsze statystyki zaktualizowane!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Nie udało się odświeżyć: {e}")
 
     # --- EKSPORT DO CSV ---
     if st.session_state.activities:
@@ -323,7 +340,6 @@ if st.session_state.activities:
                 df_w = df_acts.copy()
                 
             if not df_w.empty:
-                # Obliczanie poniedziałku i niedzieli jako pełnego zakresu tygodnia
                 df_w['WeekStart'] = df_w['DateTime'] - pd.to_timedelta(df_w['DateTime'].dt.weekday, unit='d')
                 df_w['WeekStart'] = df_w['WeekStart'].dt.date
                 df_w['WeekEnd'] = df_w['WeekStart'] + pd.Timedelta(days=6)
@@ -339,7 +355,6 @@ if st.session_state.activities:
                 if time_range_option != 999 and len(weekly_grouped) > time_range_option:
                     weekly_grouped = weekly_grouped.tail(time_range_option)
                 
-                # Tworzenie czytelnej etykiety zakresu dat np. "01.09 - 07.09.2025"
                 weekly_grouped['WeekLabel'] = weekly_grouped.apply(
                     lambda row: f"{row['WeekStart'].strftime('%d.%m')} – {row['WeekEnd'].strftime('%d.%m.%Y')}", axis=1
                 )
